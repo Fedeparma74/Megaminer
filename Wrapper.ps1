@@ -74,8 +74,7 @@ do {
                 "*ph/s*" {$HashRate *= [Math]::Pow(1000, 5)}
             }
 
-            $SetHashRate = ($HashRate -replace ",", ".")
-			$SetHashRate | Set-Content ".\Wrapper_$Id.txt"
+            $HashRate -replace ',','.' | Set-Content ".\Wrapper_$Id.txt"
         }
         $Line
     }
