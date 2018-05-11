@@ -54,14 +54,8 @@ if ($Querymode -eq "speed") {
 
 if ($Querymode -eq "wallet") {
     $Info.user = ($Info.user -split '\.')[0]
-<<<<<<< HEAD
-	$http="https://api.nicehash.com/api?method=stats.provider&addr="+$Info.user
-    $Request = Invoke-WebRequest $http -UseBasicParsing -timeoutsec 10 | ConvertFrom-Json 
-    $Request = $Request |Select-Object -ExpandProperty result  |Select-Object -ExpandProperty stats 
-=======
     $Request = Invoke-APIRequest -Url $("https://api.nicehash.com/api?method=stats.provider&addr=" + $Info.user) -Retry 3 |
         Select-Object -ExpandProperty result | Select-Object -ExpandProperty stats
->>>>>>> upstream/master
 
     if ($Request) {
         $Result = [PSCustomObject]@{
