@@ -7,9 +7,12 @@
         "-o #Protocol#://#Server#:#Port#",
         "-u #Login#",
         "-p #Password#",
+        "--cuda-devices=#Devices#",
+        "--cuda-launch=80x30",
+        "--cuda-bfactor=10",
+        "--cuda-bsleep=26",
         "#NH#--nicehash#NH#",
         "--donate-level 1",
-        "--cuda-devices=#Devices#",
         "--api-port #APIPort#",
         "#AlgorithmParameters#"
     ],
