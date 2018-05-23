@@ -79,7 +79,7 @@ $ErrorActionPreference = "Continue"
 $Config = Get-Config
 
 $Application = "Forager"
-$Release = "1.3"
+$Release = "1.6"
 Write-Log ("$Application v$Release") $LogFile $false
 
 if ($GroupNames -eq $null) {$Host.UI.RawUI.WindowTitle = $Application}
@@ -135,22 +135,17 @@ $PoolsErrors = switch ($MiningMode) {
 }
 
 $PoolsErrors | ForEach-Object {
-    "Selected MiningMode is not valid for pool " + $_.Name | Write-Host -ForegroundColor Red
+    Write-Error "Selected MiningMode is not valid for pool " + $_.Name
     Exit
 }
 
-if ($MiningMode -eq 'Manual' -and $CoinsName) {
-    "On manual mode only one coin must be selected" | Write-Host -ForegroundColor Red
+if ($MiningMode -eq 'Manual' -and ($CoinsName -split ',').Count -ne 1) {
+    Write-Error "On manual mode one coin must be selected"
     Exit
 }
 
-if ($MiningMode -eq 'Manual' -and !$CoinsName) {
-    "On manual mode must select one coin" | Write-Host -ForegroundColor Red
-    Exit
-}
-
-if ($MiningMode -eq 'Manual' -and $Algorithm) {
-    "On manual mode only one algorithm must be selected" | Write-Host -ForegroundColor Red
+if ($MiningMode -eq 'Manual' -and ($Algorithm -split ',').Count -ne 1) {
+    Write-Error "On manual mode one algorithm must be selected"
     Exit
 }
 
@@ -234,10 +229,10 @@ while ($Quit -eq $false) {
         $Uri = $Request.assets | Where-Object Name -eq "$($Application)-$($RemoteVersion).7z" | Select-Object -ExpandProperty browser_download_url
 
         if ($RemoteVersion -gt $Release) {
-            Write-Host "$Application is out of date. There is an updated version available at $URI" -ForegroundColor Yellow
+            Write-Warning "$Application is out of date. There is an updated version available at $URI"
         }
     } catch {
-        Write-Host "Failed to get $Application updates."
+        Write-Warning "Failed to get $Application updates."
     }
 
     #get mining types
@@ -373,7 +368,7 @@ while ($Quit -eq $false) {
         }
     } while ($AllPools.Count -eq 0)
 
-    $AllPools | Select-Object name -unique | ForEach-Object {Write-Log ("Pool " + $_.Name + " was responsive...") $LogFile $true}
+    $AllPools | Select-Object name -unique | ForEach-Object {Write-Log ("Pool $($_.Name) was responsive...") $LogFile $true}
 
     Write-Log ("Detected $($AllPools.Count) pools...") $LogFile $true
 
@@ -399,7 +394,7 @@ while ($Quit -eq $false) {
         if ($NeedPool) {
             ## Order by price (profitability)
             $_.Group | Sort-Object -Property `
-            @{Expression = {if ($MiningMode -eq 'Automatic24h') {"Price24h"} else {"Price"}}; Descending = $true},
+            @{Expression = $(if ($MiningMode -eq 'Automatic24h') {"Price24h"} else {"Price"}); Descending = $true},
             @{Expression = "LocationPriority"; Ascending = $true} | ForEach-Object {
                 if ($NeedPool) {
                     ## test tcp connection to pool
@@ -420,7 +415,7 @@ while ($Quit -eq $false) {
 
     #Call api to local currency conversion
     try {
-        $CDKResponse = Invoke-APIRequest -Url "https://api.Coindesk.com/v1/bpi/currentprice/$LocalCurrency.json" -MaxAge 60 |
+        $CDKResponse = Invoke-APIRequest -Url "https://api.coindesk.com/v1/bpi/currentprice/$LocalCurrency.json" -MaxAge 60 |
             Select-Object -ExpandProperty BPI
         $LocalBTCvalue = $CDKResponse.$LocalCurrency.rate_float
         Write-Log ("CoinDesk API was responsive...") $LogFile $true
@@ -491,7 +486,8 @@ while ($Quit -eq $false) {
                         $enableSSL = [bool]($Miner.SSL -and $Pool.SSL)
 
                         #Replace wildcards patterns
-                        if ($Pool.PoolName -eq 'Nicehash') {
+                        if ($Pool.PoolName -eq 'Nicehash') {$Nicehash = $true} else {$Nicehash = $false}
+                        if ($Nicehash) {
                             $WorkerName2 = $WorkerName + $DeviceGroup.GroupName #Nicehash requires alphanumeric WorkerNames
                         } else {
                             $WorkerName2 = $WorkerName + '_' + $DeviceGroup.GroupName
@@ -516,20 +512,6 @@ while ($Quit -eq $false) {
                             '#EthStMode#'           = $Pool.EthStMode
                             '#GroupName#'           = $DeviceGroup.GroupName
                         }
-                        if ($enableSSL) {
-                            $Params.'#SSL#(.*)#SSL#' = '$1'
-                            $Params.'#NoSSL#(.*)#NoSSL#' = ''
-                        } else {
-                            $Params.'#SSL#(.*)#SSL#' = ''
-                            $Params.'#NoSSL#(.*)#NoSSL#' = '$1'
-                        }
-                        if ($Pool.PoolName -eq 'Nicehash') {
-                            $Params.'#NH#(.*)#NH#' = '$1'
-                            $Params.'#NoNH#(.*)#NoNH#' = ''
-                        } else {
-                            $Params.'#NH#(.*)#NH#' = ''
-                            $Params.'#NoNH#(.*)#NoNH#' = '$1'
-                        }
 
                         $Arguments = $Miner.Arguments -join " "
                         foreach ($P in $Params.Keys) {$Arguments = $Arguments -replace $P, $Params.$P}
@@ -537,10 +519,6 @@ while ($Quit -eq $false) {
                         if ($PatternConfigFile -and (Test-Path -Path $PatternConfigFile)) {
                             $ConfigFileArguments = Replace-ForEachDevice (Get-Content $PatternConfigFile -raw) -Devices $DeviceGroup.Devices
                             foreach ($P in $Params.Keys) {$ConfigFileArguments = $ConfigFileArguments -replace $P, $Params.$P}
-                        }
-                        if ($Miner.PatternPoolsFile -and (Test-Path -Path $Miner.PatternPoolsFile)) {
-                            $PoolsFileArguments = Get-Content $Miner.PatternPoolsFile -raw
-                            foreach ($P in $Params.Keys) {$PoolsFileArguments = $PoolsFileArguments -replace $P, $Params.$P}
                         }
 
                         #select correct price by mode
@@ -551,7 +529,7 @@ while ($Quit -eq $false) {
                             #search dual pool and select correct price by mode
                             $PoolDual = $Pools |
                                 Where-Object Algorithm -eq $AlgoNameDual |
-                                Sort-Object @{Expression = {if ($MiningMode -eq 'Automatic24h') {"Price24h"} else {"Price"}}; Descending = $true} |
+                                Sort-Object @{Expression = $(if ($MiningMode -eq 'Automatic24h') {"Price24h"} else {"Price"}); Descending = $true} |
                                 Select-Object -First 1
                             $PriceDual = [double]$PoolDual.$(if ($MiningMode -eq 'Automatic24h') {"Price24h"} else {"Price"})
 
@@ -575,9 +553,6 @@ while ($Quit -eq $false) {
                             foreach ($P in $Params.Keys) {$Arguments = $Arguments -replace $P, $Params.$P}
                             if ($PatternConfigFile -and (Test-Path -Path $PatternConfigFile)) {
                                 foreach ($P in $Params.Keys) {$ConfigFileArguments = $ConfigFileArguments -replace $P, $Params.$P}
-                            }
-                            if ($Miner.PatternPoolsFile -and (Test-Path -Path $Miner.PatternPoolsFile)) {
-                                foreach ($P in $Params.Keys) {$PoolsFileArguments = $PoolsFileArguments -replace $P, $Params.$P}
                             }
                         } else {
                             $PoolDual = $null
@@ -664,9 +639,9 @@ while ($Quit -eq $false) {
                                 BenchmarkedTimes = 0
                                 LastTimeActive   = [DateTime]0
                                 ActivatedTimes   = 0
-                                ActiveTime       = [TimeSpan]0
+                                ActiveTime       = 0
                                 FailedTimes      = 0
-                                StatsTime        = [TimeSpan]0
+                                StatsTime        = [DateTime]0
                             }
                             if (!$StatsHistory) {$StatsHistory = $Stats}
 
@@ -710,10 +685,8 @@ while ($Quit -eq $false) {
                             Coin                = $Pool.Info
                             CoinDual            = $PoolDual.Info
                             ConfigFileArguments = $ExecutionContext.InvokeCommand.ExpandString($ConfigFileArguments)
-                            PoolsFileArguments  = $ExecutionContext.InvokeCommand.ExpandString($PoolsFileArguments)
                             ExtractionPath      = $(".\Bin\" + $MinerFile.BaseName + "\")
                             GenerateConfigFile  = $(if ($PatternConfigFile) {".\Bin\" + $MinerFile.BaseName + "\" + $Miner.GenerateConfigFile -replace '#GroupName#', $DeviceGroup.GroupName -replace '#Algorithm#', $AlgoName})
-                            GeneratePoolsFile   = $(if ($Miner.GeneratePoolsFile) {".\Bin\" + $MinerFile.BaseName + "\" + $Miner.GeneratePoolsFile -replace '#GroupName#', $DeviceGroup.GroupName -replace '#Algorithm#', $AlgoName})
                             DeviceGroup         = $DeviceGroup
                             Host                = $Pool.Host
                             Location            = $Pool.Location
@@ -849,9 +822,7 @@ while ($Quit -eq $false) {
                 Coin                = $Miner.Coin
                 CoinDual            = $Miner.CoinDual
                 ConfigFileArguments = $Miner.ConfigFileArguments
-                PoolsFileArguments  = $Miner.PoolsFileArguments
                 GenerateConfigFile  = $Miner.GenerateConfigFile
-                GeneratePoolsFile   = $Miner.GeneratePoolsFile
                 DeviceGroup         = $Miner.DeviceGroup
                 Host                = $Miner.Host
                 Id                  = $ActiveMiners.Count
@@ -1028,7 +999,7 @@ while ($Quit -eq $false) {
 
                     if ($Bestnow.NeedBenchmark -or $DelayCloseMiners -eq 0 -or $BestLast.Status -eq 'PendingCancellation') {
                         #inmediate kill
-                        Exit-Process $ActiveMiners[$BestLast.IdF].Process
+                        if ($ActiveMiners[$BestLast.IdF].Process) {Exit-Process $ActiveMiners[$BestLast.IdF].Process}
                     } else {
                         #delayed kill
                         $Code = {
@@ -1067,9 +1038,6 @@ while ($Quit -eq $false) {
                 if ($ActiveMiners[$BestNow.IdF].GenerateConfigFile) {
                     $ActiveMiners[$BestNow.IdF].ConfigFileArguments = $ActiveMiners[$BestNow.IdF].ConfigFileArguments -replace '#APIPort#', $ActiveMiners[$BestNow.IdF].Port
                     $ActiveMiners[$BestNow.IdF].ConfigFileArguments | Set-Content ($ActiveMiners[$BestNow.IdF].GenerateConfigFile)
-                }
-                if ($ActiveMiners[$BestNow.IdF].GeneratePoolsFile) {
-                    $ActiveMiners[$BestNow.IdF].PoolsFileArguments | Set-Content ($ActiveMiners[$BestNow.IdF].GeneratePoolsFile)
                 }
 
                 if ($ActiveMiners[$BestNow.IdF].PrelaunchCommand) {Start-Process -FilePath $ActiveMiners[$BestNow.IdF].PrelaunchCommand}            #run prelaunch command
@@ -1125,7 +1093,6 @@ while ($Quit -eq $false) {
             Value      = $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].StatsHistory
         }
         Set-Stats @Params
-
     }
 
     if ($ActiveMiners | Where-Object IsValid | Select-Object -ExpandProperty Subminers | Where-Object {$_.NeedBenchmark -and $_.Status -ne 'Cancelled'}) {$NeedBenchmark = $true} else {$NeedBenchmark = $false}
@@ -1202,7 +1169,7 @@ while ($Quit -eq $false) {
                     $_.SpeedLive -and
                     ($_.SpeedLiveDual -or !$ActiveMiners[$_.IdF].AlgorithmDual)
                 ) {
-                    if ($_.Stats.StatsTime) { $_.Stats.ActiveTime += (Get-Date) - $_.Stats.StatsTime }
+                    if ($_.Stats.StatsTime) { $_.Stats.ActiveTime += ((Get-Date) - $_.Stats.StatsTime).TotalSeconds }
                     $_.Stats.StatsTime = Get-Date
 
                     [array]$_.SpeedReads = $_.SpeedReads
@@ -1700,7 +1667,7 @@ while ($Quit -eq $false) {
                 Sort-Object `
             @{expression = {$ActiveMiners[$_.IdF].DeviceGroup.GroupName -eq 'CPU'}; Ascending = $true},
             @{expression = {$ActiveMiners[$_.IdF].DeviceGroup.GroupName}; Ascending = $true},
-            @{expression = {$_.Stats.Activetime.TotalMinutes}; Descending = $true} |
+            @{expression = {$_.Stats.Activetime}; Descending = $true} |
                 Format-Table -Wrap -GroupBy @{Label = "Group"; Expression = {$ActiveMiners[$_.IdF].DeviceGroup.GroupName}}(
                 @{Label = "Algorithm"; Expression = {$ActiveMiners[$_.IdF].Algorithms + $(if ($ActiveMiners[$_.IdF].AlgoLabel) {"|$($ActiveMiners[$_.IdF].AlgoLabel)"})}},
                 @{Label = "Coin"; Expression = {$ActiveMiners[$_.IdF].Symbol + $(if ($ActiveMiners[$_.IdF].AlgorithmDual) {"_$($ActiveMiners[$_.IdF].SymbolDual)"})}},
@@ -1709,7 +1676,7 @@ while ($Quit -eq $false) {
                 @{Label = "PwLmt"; Expression = {if ($_.PowerLimit -gt 0) {$_.PowerLimit}}},
                 @{Label = "Launch"; Expression = {$_.Stats.ActivatedTimes}},
                 @{Label = "Best"; Expression = {$_.Stats.BestTimes}},
-                @{Label = "ActiveTime"; Expression = {if ($_.Stats.ActiveTime.TotalMinutes -le 60) {"{0:N1} min" -f ($_.Stats.ActiveTime.TotalMinutes)} else {"{0:N1} hours" -f ($_.Stats.ActiveTime.TotalHours)}}},
+                @{Label = "ActiveTime"; Expression = {if ($_.Stats.ActiveTime -le 3600) {"{0:N1} min" -f ($_.Stats.ActiveTime / 60)} else {"{0:N1} hours" -f ($_.Stats.ActiveTime / 3600)}}},
                 @{Label = "LastTimeActive"; Expression = {$($_.Stats.LastTimeActive).tostring("dd/MM/yy H:mm")}},
                 @{Label = "Status"; Expression = {$_.Status}}
             ) | Out-Host
