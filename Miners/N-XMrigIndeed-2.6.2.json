@@ -20,6 +20,6 @@
         "CryptoLightV7": "-a cryptonight-lite --variant 1",
         "CryptoNightV7": "-a cryptonight --variant 1",
         "CryptoNightHeavy": "-a cryptonight-heavy",
-		"CryptoLightIPBC": "-a ipbc"
+        "CryptoLightIPBC": "-a ipbc"
     }
 }
