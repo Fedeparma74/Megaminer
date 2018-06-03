@@ -57,7 +57,7 @@ Import-Module "$env:Windir\System32\WindowsPowerShell\v1.0\Modules\Defender\Defe
 
 $LogPath = '.\Logs\'
 if (!(Test-Path -Path $LogPath)) { New-Item -Path $LogPath -ItemType directory | Out-Null }
-$LogName = $LogPath + "$(Get-Date -Format "yyyy-MM-dd_HH-mm-ss").txt"
+$LogName = $LogPath + "$(Get-Date -Format "yyyy-MM-dd_HH-mm-ss").log"
 Start-Transcript $LogName   #for start log msg
 Stop-Transcript
 $LogFile = [System.IO.StreamWriter]::new( $LogName, $true )
@@ -899,7 +899,7 @@ while ($Quit -eq $false) {
         #look for last round best
         $Candidates = $ActiveMiners | Where-Object {$_.DeviceGroup.Id -eq $DeviceGroup.Id}
         $BestLast = $Candidates.SubMiners | Where-Object {$_.Status -in @("Running", "PendingCancellation")}
-        if ($null -ne $BestLast) {
+        if ($BestLast) {
             $ProfitLast = $BestLast.Profits
             $BestLastLogMsg = $(
                 "$($ActiveMiners[$BestLast.IdF].Name)/" +
@@ -911,6 +911,31 @@ while ($Quit -eq $false) {
                 "for group $($DeviceGroup.GroupName)")
         } else {
             $ProfitLast = 0
+        }
+
+        if ($BestLast -and $config.SessionStatistics -eq 'Enabled') {
+            $BestLast | Select-Object -Property `
+            @{Name = "Date"; Expression = {Get-Date -f "yyyy-MM-dd"}},
+            @{Name = "Time"; Expression = {Get-Date -f "HH:mm:ss"}},
+            @{Name = "Group"; Expression = {$DeviceGroup.GroupName}},
+            @{Name = "Name"; Expression = {$ActiveMiners[$_.IdF].Name}},
+            @{Name = "Algorithm"; Expression = {$ActiveMiners[$_.IdF].Algorithm}},
+            @{Name = "AlgorithmDual"; Expression = {$ActiveMiners[$_.IdF].AlgorithmDual}},
+            @{Name = "AlgoLabel"; Expression = {$ActiveMiners[$_.IdF].AlgoLabel}},
+            @{Name = "Coin"; Expression = {$ActiveMiners[$_.IdF].Coin}},
+            @{Name = "CoinDual"; Expression = {$ActiveMiners[$_.IdF].CoinDual}},
+            @{Name = "PoolName"; Expression = {$ActiveMiners[$_.IdF].PoolName}},
+            @{Name = "PoolNameDual"; Expression = {$ActiveMiners[$_.IdF].PoolNameDual}},
+            @{Name = "PowerLimit"; Expression = {$_.PowerLimit}},
+            @{Name = "HashRate"; Expression = {[decimal]$_.HashRate}},
+            @{Name = "HashRateDual"; Expression = {[decimal]$_.HashRateDual}},
+            @{Name = "Revenue"; Expression = {[decimal]$_.Revenue}},
+            @{Name = "RevenueDual"; Expression = {[decimal]$_.RevenueDual}},
+            @{Name = "Profits"; Expression = {[decimal]$_.Profits}},
+            @{Name = "IntervalRevenue"; Expression = {[decimal]$_.Revenue * $LastIntervalTime.TotalSeconds / (24 * 60 * 60)}},
+            @{Name = "IntervalRevenueDual"; Expression = {[decimal]$_.RevenueDual * $LastIntervalTime.TotalSeconds / (24 * 60 * 60)}},
+            @{Name = "Interval"; Expression = {[int]$LastIntervalTime.TotalSeconds}} |
+                Export-Csv -Path $(".\Logs\Stats-" + (Get-Process -PID $PID).StartTime.tostring('yyyy-MM-dd_HH-mm-ss') + ".csv") -Append -NoTypeInformation
         }
 
         #check if must cancel miner/algo/coin combo
@@ -931,7 +956,7 @@ while ($Quit -eq $false) {
             Sort-Object -Descending NeedBenchmark, Profits, HashRate, HashRateDual, @{Expression = {$ActiveMiners[$_.IdF].Algorithm}; Ascending = $true}, {$ActiveMiners[$_.IdF].PoolPrice}, {$ActiveMiners[$_.IdF].PoolPriceDual}, PowerLimit |
             Select-Object -First 1
 
-        if ($null -eq $BestNow) {Log-Message "No valid candidate for device group $($DeviceGroup.GroupName)" -Severity Warn; Continue}
+        if ($BestNow -eq $null) {Log-Message "No valid candidate for device group $($DeviceGroup.GroupName)" -Severity Warn; Continue}
 
         $BestNowLogMsg = $(
             "$($ActiveMiners[$BestNow.IdF].Name)/" +
@@ -954,7 +979,8 @@ while ($Quit -eq $false) {
         if (
             $BestLast.IdF -ne $BestNow.IdF -or
             $BestLast.Id -ne $BestNow.Id -or
-            $BestLast.Status -in @("PendingCancellation", "Cancelled")
+            $BestLast.Status -in @("PendingCancellation", "Cancelled") -or
+            -not $BestNow
         ) {
             #something changes or some miner error
 
@@ -995,13 +1021,14 @@ while ($Quit -eq $false) {
                 $ProfitNow -gt ($ProfitLast * (1 + ($PercentToSwitch2 / 100))) -or
                 $BestNow.NeedBenchmark -or
                 $BestLast.Status -in @("Running", "PendingCancellation", "Cancelled") -or
-                $null -eq $BestLast -or
+                -not $BestNow -or
+                -not $BestLast -or
                 $DonationInterval
             ) {
-                #Must launch other miner and stop actual
+                #Must launch other miner and/or stop actual
 
                 #Stop old
-                if ($null -ne $BestLast) {
+                if ($BestLast) {
 
                     Log-Message "Killing in $DelayCloseMiners sec. $BestLastLogMsg with system process id $($ActiveMiners[$BestLast.IdF].Process.Id)"
 
@@ -1029,59 +1056,61 @@ while ($Quit -eq $false) {
                 }
 
                 #Start New
-                if ($BestNow.PowerLimit -gt 0) {
-                    if ($abControl) {
-                        Set-AfterburnerPowerLimit -PowerLimitPercent $BestNow.PowerLimit -DeviceGroup $ActiveMiners[$BestNow.IdF].DeviceGroup
+                if ($BestNow) {
+
+                    if ($BestNow.PowerLimit -gt 0) {
+                        if ($abControl) {
+                            Set-AfterburnerPowerLimit -PowerLimitPercent $BestNow.PowerLimit -DeviceGroup $ActiveMiners[$BestNow.IdF].DeviceGroup
+                        } else {
+                            if ($ActiveMiners[$BestNow.IdF].DeviceGroup.Type -eq 'NVIDIA') {Set-NvidiaPowerLimit $BestNow.PowerLimit $ActiveMiners[$BestNow.IdF].DeviceGroup.Devices}
+                            if ($ActiveMiners[$BestNow.IdF].DeviceGroup.Type -eq 'AMD') {}
+                        }
+                    }
+
+                    $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].Best = $true
+
+                    if ($null -eq $ActiveMiners[$BestNow.IdF].Port) { $ActiveMiners[$BestNow.IdF].Port = Get-NextFreePort (Get-Random -minimum 2000 -maximum 48000)}
+                    $ActiveMiners[$BestNow.IdF].Arguments = $ActiveMiners[$BestNow.IdF].Arguments -replace '#APIPort#', $ActiveMiners[$BestNow.IdF].Port
+
+                    if ($ActiveMiners[$BestNow.IdF].GenerateConfigFile) {
+                        $ActiveMiners[$BestNow.IdF].ConfigFileArguments = $ActiveMiners[$BestNow.IdF].ConfigFileArguments -replace '#APIPort#', $ActiveMiners[$BestNow.IdF].Port
+                        $ActiveMiners[$BestNow.IdF].ConfigFileArguments | Set-Content ($ActiveMiners[$BestNow.IdF].GenerateConfigFile)
+                    }
+
+                    if ($ActiveMiners[$BestNow.IdF].PrelaunchCommand) {Start-Process -FilePath $ActiveMiners[$BestNow.IdF].PrelaunchCommand}            #run prelaunch command
+
+                    $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].Stats.ActivatedTimes++
+                    $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].StatsHistory.ActivatedTimes++
+
+                    $Arguments = $ActiveMiners[$BestNow.IdF].Arguments
+                    if ($ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].NeedBenchmark -and $ActiveMiners[$BestNow.IdF].BenchmarkArg) {$Arguments += " " + $ActiveMiners[$BestNow.IdF].BenchmarkArg }
+
+                    if ($ActiveMiners[$BestNow.IdF].Api -eq "Wrapper") {
+                        $ProcessParams = @{
+                            FilePath     = (Get-Process -Id $Global:PID).Path
+                            ArgumentList = "-executionpolicy bypass -command . '$(Convert-Path ".\Wrapper.ps1")' -ControllerProcessID $PID -Id '$($ActiveMiners[$BestNow.IdF].Port)' -FilePath '$($ActiveMiners[$BestNow.IdF].Path)' -ArgumentList '$($Arguments)' -WorkingDirectory '$(Split-Path $ActiveMiners[$BestNow.IdF].Path)'"
+                        }
                     } else {
-                        if ($ActiveMiners[$BestNow.IdF].DeviceGroup.Type -eq 'NVIDIA') {Set-NvidiaPowerLimit $BestNow.PowerLimit $ActiveMiners[$BestNow.IdF].DeviceGroup.Devices}
-                        if ($ActiveMiners[$BestNow.IdF].DeviceGroup.Type -eq 'AMD') {}
+                        $ProcessParams = @{
+                            FilePath     = $ActiveMiners[$BestNow.IdF].Path
+                            ArgumentList = $Arguments
+                        }
                     }
-                }
-
-                $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].Best = $true
-
-                if ($null -eq $ActiveMiners[$BestNow.IdF].Port) { $ActiveMiners[$BestNow.IdF].Port = Get-NextFreePort (Get-Random -minimum 2000 -maximum 48000)}
-                $ActiveMiners[$BestNow.IdF].Arguments = $ActiveMiners[$BestNow.IdF].Arguments -replace '#APIPort#', $ActiveMiners[$BestNow.IdF].Port
-
-                if ($ActiveMiners[$BestNow.IdF].GenerateConfigFile) {
-                    $ActiveMiners[$BestNow.IdF].ConfigFileArguments = $ActiveMiners[$BestNow.IdF].ConfigFileArguments -replace '#APIPort#', $ActiveMiners[$BestNow.IdF].Port
-                    $ActiveMiners[$BestNow.IdF].ConfigFileArguments | Set-Content ($ActiveMiners[$BestNow.IdF].GenerateConfigFile)
-                }
-
-                if ($ActiveMiners[$BestNow.IdF].PrelaunchCommand) {Start-Process -FilePath $ActiveMiners[$BestNow.IdF].PrelaunchCommand}            #run prelaunch command
-
-                $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].Stats.ActivatedTimes++
-                $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].StatsHistory.ActivatedTimes++
-
-                $Arguments = $ActiveMiners[$BestNow.IdF].Arguments
-                if ($ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].NeedBenchmark -and $ActiveMiners[$BestNow.IdF].BenchmarkArg) {$Arguments += " " + $ActiveMiners[$BestNow.IdF].BenchmarkArg }
-
-                if ($ActiveMiners[$BestNow.IdF].Api -eq "Wrapper") {
-                    $ProcessParams = @{
-                        FilePath     = (Get-Process -Id $Global:PID).Path
-                        ArgumentList = "-executionpolicy bypass -command . '$(Convert-Path ".\Wrapper.ps1")' -ControllerProcessID $PID -Id '$($ActiveMiners[$BestNow.IdF].Port)' -FilePath '$($ActiveMiners[$BestNow.IdF].Path)' -ArgumentList '$($Arguments)' -WorkingDirectory '$(Split-Path $ActiveMiners[$BestNow.IdF].Path)'"
+                    $CommonParams = @{
+                        WorkingDirectory = Split-Path $ActiveMiners[$BestNow.IdF].Path
+                        MinerWindowStyle = $MinerWindowStyle
+                        Priority         = if ($ActiveMiners[$BestNow.IdF].GroupType -eq "CPU") {-2} else {-1}
                     }
-                } else {
-                    $ProcessParams = @{
-                        FilePath     = $ActiveMiners[$BestNow.IdF].Path
-                        ArgumentList = $Arguments
-                    }
-                }
-                $CommonParams = @{
-                    WorkingDirectory = Split-Path $ActiveMiners[$BestNow.IdF].Path
-                    MinerWindowStyle = $MinerWindowStyle
-                    Priority         = if ($ActiveMiners[$BestNow.IdF].GroupType -eq "CPU") {-2} else {-1}
-                }
-                $ActiveMiners[$BestNow.IdF].Process = Start-SubProcess @ProcessParams @CommonParams
+                    $ActiveMiners[$BestNow.IdF].Process = Start-SubProcess @ProcessParams @CommonParams
 
-                $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].Status = "Running"
-                $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].BestBySwitch = ""
-                $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].Stats.LastTimeActive = Get-Date
-                $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].Stats.StatsTime = Get-Date
-                $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].StatsHistory.LastTimeActive = Get-Date
-                $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].TimeSinceStartInterval = [TimeSpan]0
-                Log-Message "Started System process Id $($ActiveMiners[$BestNow.IdF].Process.Id) for $BestNowLogMsg --> $($ActiveMiners[$BestNow.IdF].Path) $($ActiveMiners[$BestNow.IdF].Arguments)" -Severity Debug
-
+                    $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].Status = "Running"
+                    $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].BestBySwitch = ""
+                    $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].Stats.LastTimeActive = Get-Date
+                    $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].Stats.StatsTime = Get-Date
+                    $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].StatsHistory.LastTimeActive = Get-Date
+                    $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].TimeSinceStartInterval = [TimeSpan]0
+                    Log-Message "Started System process Id $($ActiveMiners[$BestNow.IdF].Process.Id) for $BestNowLogMsg --> $($ActiveMiners[$BestNow.IdF].Path) $($ActiveMiners[$BestNow.IdF].Arguments)" -Severity Debug
+                }
             } else {
                 #Must mantain last miner by switch
                 $ActiveMiners[$BestLast.IdF].SubMiners[$BestLast.Id].Best = $true
@@ -1114,6 +1143,7 @@ while ($Quit -eq $false) {
             $PoolInterval  # Return value
         } | Measure-Object -Maximum | Select-Object -ExpandProperty Maximum
     }
+    if (-not $NextInterval) {$NextInterval = 60} # fix cases when no best miners available
     Log-Message "Next interval: $NextInterval"
 
     $FirstLoopExecution = $true
@@ -1253,7 +1283,7 @@ while ($Quit -eq $false) {
                 NumberOfDevices = $GroupDevices.count
             }
 
-            if ($ActivityAverages.count -gt 20) {
+            if ($ActivityAverages.count -gt 20 -and ($ActiveMiners.SubMiners | Where-Object Best).count -gt 0) {
                 $ActivityAverages = $ActivityAverages[($ActivityAverages.Count - 20)..($ActivityAverages.Count - 1)]
                 $ActivityAverage = ($ActivityAverages | Where-Object DeviceGroup -eq $ActiveMiners[$_.IdF].DeviceGroup.GroupName | Measure-Object -property Average -maximum).maximum
                 $ActivityDeviceCount = ($ActivityAverages | Where-Object DeviceGroup -eq $ActiveMiners[$_.IdF].DeviceGroup.GroupName | Measure-Object -property NumberOfDevices -maximum).maximum
@@ -1298,7 +1328,7 @@ while ($Quit -eq $false) {
         #############################################################
 
         if ($NeedBenchmark -and ($ActiveMiners | Where-Object IsValid | Select-Object -ExpandProperty SubMiners | Where-Object {$_.NeedBenchmark -and $_.Best}).Count -eq 0) {
-            Log-Message "Benchmark completed early" -Severity Info
+            Log-Message "Benchmark completed early"
             $ExitLoop = $true
         }
 

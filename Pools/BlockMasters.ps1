@@ -68,7 +68,7 @@ if (($Querymode -eq "core" ) -or ($Querymode -eq "Menu")) {
     $Request = Invoke-APIRequest -Url $($ApiUrl + "/status") -Retry 3
     $RequestCurrencies = Invoke-APIRequest -Url $($ApiUrl + "/currencies") -Retry 3
     if (!$Request -or !$RequestCurrencies) {
-        Write-Host $Name 'API NOT RESPONDING...ABORTING'
+        Write-Warning "$Name API NOT RESPONDING...ABORTING"
         Exit
     }
 
@@ -78,11 +78,11 @@ if (($Querymode -eq "core" ) -or ($Querymode -eq "Menu")) {
         $Currency -notin @('BTC', 'LTC', 'DOGE') -and
         !($RequestCurrencies | Get-Member -MemberType NoteProperty | Select-Object -ExpandProperty Name | Where-Object { $_ -eq $Currency })
     ) {
-        Write-Host "$Name $Currency may not be supported for payment" -ForegroundColor Yellow
+        Write-Warning "$Name $Currency may not be supported for payment"
     }
 
     if (!$CoinsWallets.$Currency) {
-        Write-Host "$Name $Currency wallet not defined in config.ini"
+        Write-Warning "$Name $Currency wallet not defined in config.ini"
         Exit
     }
 
@@ -95,18 +95,11 @@ if (($Querymode -eq "core" ) -or ($Querymode -eq "Menu")) {
         $Algo = $Request.$_
         $Pool_Algo = Get-AlgoUnifiedName $Algo.name
 
-        $Divisor = 1000000
+        $Divisor = 1000000 * $Algo.mbtc_mh_factor
 
         switch ($Pool_Algo) {
-            "Blake2s" {$Divisor *= 1000}
-            "Blakecoin" {$Divisor *= 1000}
-            "Decred" {$Divisor *= 1000}
-            "Equihash" {$Divisor /= 1000}
-            "Quark" {$Divisor *= 1000}
-            "Qubit" {$Divisor *= 1000}
-            "Scrypt" {$Divisor *= 1000}
-            "SHA256" {$Divisor *= 1000}
-            "X11" {$Divisor *= 1000}
+            #temp fix for profitability
+            "YescryptR16" {$Divisor *= 1000}
         }
 
         $Result += [PSCustomObject]@{
