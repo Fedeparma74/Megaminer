@@ -2,21 +2,22 @@ Add-Type -Path .\Includes\OpenCL\*.cs
 
 function Set-NvidiaPowerLimit ([int]$PowerLimitPercent, [string]$Devices) {
 
+    if ($PowerLimitPercent -eq 0) { return }
     foreach ($Device in @($Devices -split ',')) {
 
         $Command = '.\includes\nvidia-smi.exe'
         $Arguments = @(
-            '-i ' + $Device
-            '--query-gpu=power.default_limit'
-            '--format=csv,noheader'
+            "-i $Device"
+            "--query-gpu=power.default_limit"
+            "--format=csv,noheader"
         )
-        $PowerDefaultLimit = [int]((& $Command $Arguments) -replace 'W', '')
+        $PowerDefaultLimit = [int](((& $Command $Arguments) -replace 'W').Trim())
 
         #powerlimit change must run in admin mode
         $newProcess = New-Object System.Diagnostics.ProcessStartInfo ".\includes\nvidia-smi.exe"
         $newProcess.Verb = "runas"
         #$newProcess.UseShellExecute = $false
-        $newProcess.Arguments = "-i " + $Device + " -pl " + [Math]::Floor([int]($PowerDefaultLimit -replace ' W', '') * ($PowerLimitPercent / 100))
+        $newProcess.Arguments = "-i $Device -pl $([Math]::Floor([int]($PowerDefaultLimit -replace ' W', '') * ($PowerLimitPercent / 100)))"
         [System.Diagnostics.Process]::Start($newProcess) | Out-Null
     }
     Remove-Variable newprocess
@@ -162,14 +163,14 @@ function Get-DevicesInformation ($Types) {
                     Group             = $Group
                     AdapterId         = [int]$_.Index
                     Name              = $_.Device
-                    Utilization       = [int]$($CardData | Where-Object SrcName -match "^(GPU\d* )?usage").Data
-                    UtilizationMem    = [int]$($mem = $CardData | Where-Object SrcName -match "^(GPU\d* )?memory usage"; if ($mem.MaxLimit) {$mem.Data / $mem.MaxLimit * 100})
-                    Clock             = [int]$($CardData | Where-Object SrcName -match "^(GPU\d* )?core clock").Data
-                    ClockMem          = [int]$($CardData | Where-Object SrcName -match "^(GPU\d* )?memory clock").Data
-                    FanSpeed          = [int]$($CardData | Where-Object SrcName -match "^(GPU\d* )?fan speed").Data
-                    Temperature       = [int]$($CardData | Where-Object SrcName -match "^(GPU\d* )?temperature").Data
-                    PowerDraw         = [int]$($CardData | Where-Object SrcName -match "^(GPU\d* )?power").Data
-                    PowerLimitPercent = [int]$($abControl.GpuEntries[$_.Index].PowerLimitCur + 100)
+                    Utilization       = [int]$($CardData | Where-Object SrcName -match "^(GPU\d* )?usage$").Data
+                    UtilizationMem    = [int]$($mem = $CardData | Where-Object SrcName -match "^(GPU\d* )?memory usage$"; if ($mem.MaxLimit) {$mem.Data / $mem.MaxLimit * 100})
+                    Clock             = [int]$($CardData | Where-Object SrcName -match "^(GPU\d* )?core clock$").Data
+                    ClockMem          = [int]$($CardData | Where-Object SrcName -match "^(GPU\d* )?memory clock$").Data
+                    FanSpeed          = [int]$($CardData | Where-Object SrcName -match "^(GPU\d* )?fan speed$").Data
+                    Temperature       = [int]$($CardData | Where-Object SrcName -match "^(GPU\d* )?temperature$").Data
+                    PowerDraw         = [int]$($CardData | Where-Object SrcName -match "^(GPU\d* )?power$").Data
+                    PowerLimitPercent = [int]$($abControl.GpuEntries[$_.Index].PowerLimitCur)
                 }
                 $Devices += [PSCustomObject]$Card
                 $DeviceId++
@@ -255,7 +256,7 @@ function Get-DevicesInformation ($Types) {
                         Utilization       = [int]$AdlResultSplit[5]
                         Temperature       = [int]$AdlResultSplit[6] / 1000
                         PowerLimitPercent = 100 + [int]$AdlResultSplit[7]
-                        PowerDraw         = $AmdCardsTDP.$($AdlResultSplit[8].Trim()) * ((100 + [double]$AdlResultSplit[7]) / 100) * ([double]$AdlResultSplit[5] / 100)
+                        PowerDraw         = $AmdCardsTDP.$CardName * ((100 + [double]$AdlResultSplit[7]) / 100) * ([double]$AdlResultSplit[5] / 100)
                         Name              = $CardName
                         UDID              = $AdlResultSplit[9].Trim()
                     }
@@ -1215,10 +1216,11 @@ function Set-WindowSize ([int]$Width, [int]$Height) {
 
 function Get-AlgoUnifiedName ([string]$Algo) {
 
-    if (![string]::IsNullOrEmpty($Algo)) {
+    $Algo = $Algo -ireplace '[^\w]'
+    if ($Algo) {
         $Algos = Get-Content -Path ".\Includes\algorithms.json" | ConvertFrom-Json
-        if ($null -ne $Algos.($Algo.Trim())) { $Algos.($Algo.Trim()) }
-        else { $Algo.Trim() }
+        if ($Algos.$Algo) { $Algos.$Algo }
+        else { $Algo }
     }
 }
 
