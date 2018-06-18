@@ -79,7 +79,7 @@ $ErrorActionPreference = "Continue"
 $Config = Get-Config
 
 $Application = "Forager"
-$Release = "1.7"
+$Release = "1.8"
 Log-Message "$Application v$Release"
 
 if ($GroupNames -eq $null) {$Host.UI.RawUI.WindowTitle = $Application}
@@ -514,8 +514,9 @@ while ($Quit -eq $false) {
                         }
 
                         $Arguments = $Miner.Arguments -join " "
+                        $Arguments = $Arguments -replace '#AlgorithmParameters#', $Algo.Value
                         foreach ($P in $Params.Keys) {$Arguments = $Arguments -replace $P, $Params.$P}
-                        $PatternConfigFile = $Miner.PatternConfigFile -replace '#Algorithm#', $AlgoName
+                        $PatternConfigFile = $Miner.PatternConfigFile -replace '#Algorithm#', $AlgoName -replace '#GroupName#', $DeviceGroup.GroupName
                         if ($PatternConfigFile -and (Test-Path -Path $PatternConfigFile)) {
                             $ConfigFileArguments = Replace-ForEachDevice (Get-Content $PatternConfigFile -raw) -Devices $DeviceGroup.Devices
                             foreach ($P in $Params.Keys) {$ConfigFileArguments = $ConfigFileArguments -replace $P, $Params.$P}
@@ -1104,7 +1105,7 @@ while ($Quit -eq $false) {
                     $CommonParams = @{
                         WorkingDirectory = Split-Path $ActiveMiners[$BestNow.IdF].Path
                         MinerWindowStyle = $MinerWindowStyle
-                        Priority         = if ($ActiveMiners[$BestNow.IdF].GroupType -eq "CPU") {-2} else {-1}
+                        Priority         = if ($ActiveMiners[$BestNow.IdF].DeviceGroup.Type -eq "CPU") {-2} else {-1}
                     }
                     $ActiveMiners[$BestNow.IdF].Process = Start-SubProcess @ProcessParams @CommonParams
 
