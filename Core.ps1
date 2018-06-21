@@ -704,7 +704,7 @@ while ($Quit -eq $false) {
                             PoolWorkers         = $Pool.PoolWorkers
                             PoolWorkersDual     = $PoolDual.PoolWorkers
                             Port                = $(if (($DeviceGroups | Where-Object type -eq $DeviceGroup.type).Count -le 1 -and $DelayCloseMiners -eq 0 -and $config.ForceDynamicPorts -ne "Enabled") { $Miner.ApiPort })
-                            PrelaunchCommand    = $Miner.PrelaunchCommand
+                            PrelaunchCommand    = $ExecutionContext.InvokeCommand.ExpandString($Miner.PrelaunchCommand)
                             PrerequisitePath    = $Miner.PrerequisitePath
                             PrerequisiteURI     = $Miner.PrerequisiteURI
                             SubMiners           = $SubMiners
@@ -1065,7 +1065,7 @@ while ($Quit -eq $false) {
                     if ($BestNow.PowerLimit -ne $BestLast.PowerLimit) {
                         if ($abControl) {
                             Set-AfterburnerPowerLimit -PowerLimitPercent $BestNow.PowerLimit -DeviceGroup $ActiveMiners[$BestNow.IdF].DeviceGroup
-                        } elseif ($BestNow.PowerLimit -ne 0) {
+                        } elseif ($BestNow.PowerLimit -gt 0) {
                             switch ($ActiveMiners[$BestNow.IdF].DeviceGroup.Type) {
                                 'NVIDIA' { Set-NvidiaPowerLimit $BestNow.PowerLimit $ActiveMiners[$BestNow.IdF].DeviceGroup.Devices }
                                 Default {}
@@ -1083,7 +1083,7 @@ while ($Quit -eq $false) {
                         $ActiveMiners[$BestNow.IdF].ConfigFileArguments | Set-Content ($ActiveMiners[$BestNow.IdF].GenerateConfigFile)
                     }
 
-                    if ($ActiveMiners[$BestNow.IdF].PrelaunchCommand) {Start-Process -FilePath $ActiveMiners[$BestNow.IdF].PrelaunchCommand}            #run prelaunch command
+                    if ($ActiveMiners[$BestNow.IdF].PrelaunchCommand) {Invoke-Expression $ActiveMiners[$BestNow.IdF].PrelaunchCommand}            #run prelaunch command
 
                     $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].Stats.ActivatedTimes++
                     $ActiveMiners[$BestNow.IdF].SubMiners[$BestNow.Id].StatsHistory.ActivatedTimes++
