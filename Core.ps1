@@ -82,8 +82,7 @@ $Application = "Forager"
 $Release = "1.8"
 Log-Message "$Application v$Release"
 
-if ($GroupNames -eq $null) {$Host.UI.RawUI.WindowTitle = $Application}
-else {$Host.UI.RawUI.WindowTitle = "Forager-" + ($GroupNames -join "/")}
+$Host.UI.RawUI.WindowTitle = "$Application v$Release"
 
 $env:CUDA_DEVICE_ORDER = 'PCI_BUS_ID' #This align cuda id with nvidia-smi order
 $env:GPU_FORCE_64BIT_PTR = 0 #For AMD
@@ -518,7 +517,7 @@ while ($Quit -eq $false) {
                         foreach ($P in $Params.Keys) {$Arguments = $Arguments -replace $P, $Params.$P}
                         $PatternConfigFile = $Miner.PatternConfigFile -replace '#Algorithm#', $AlgoName -replace '#GroupName#', $DeviceGroup.GroupName
                         if ($PatternConfigFile -and (Test-Path -Path $PatternConfigFile)) {
-                            $ConfigFileArguments = Replace-ForEachDevice (Get-Content $PatternConfigFile -raw) -Devices $DeviceGroup.Devices
+                            $ConfigFileArguments = Replace-ForEachDevice (Get-Content $PatternConfigFile -raw) -Devices $DeviceGroup
                             foreach ($P in $Params.Keys) {$ConfigFileArguments = $ConfigFileArguments -replace $P, $Params.$P}
                         }
 
@@ -954,7 +953,7 @@ while ($Quit -eq $false) {
         $BestNow = $Candidates.SubMiners |
             Where-Object Status -ne 'Cancelled' |
             ForEach-Object {if ($_.NeedBenchmark -or $MiningMode -eq "Manual" -or $_.Profits -gt 0) {$_}} |
-            Sort-Object -Descending NeedBenchmark, Profits, HashRate, HashRateDual, @{Expression = {$ActiveMiners[$_.IdF].Algorithm}; Ascending = $true}, {$ActiveMiners[$_.IdF].PoolPrice}, {$ActiveMiners[$_.IdF].PoolPriceDual}, PowerLimit |
+            Sort-Object -Descending NeedBenchmark, {$(if ($MiningMode -eq "Manual") {$_.HashRate} else {$_.Profits})}, {$ActiveMiners[$_.IdF].PoolPrice}, {$ActiveMiners[$_.IdF].PoolPriceDual}, PowerLimit |
             Select-Object -First 1
 
         if ($BestNow -eq $null) {Log-Message "No valid candidate for device group $($DeviceGroup.GroupName)" -Severity Warn; Continue}
@@ -1360,6 +1359,11 @@ while ($Quit -eq $false) {
 
         #get pool reported speed (1 or each 10 executions to not saturate pool)
         if ($SwitchLoop -eq 0) {
+
+            $CurrentAlgos = ($ActiveMiners.SubMiners | Where-Object Best | ForEach-Object {$ActiveMiners[$_.IdF].Symbol + $(if ($ActiveMiners[$_.IdF].AlgorithmDual) {"_$($ActiveMiners[$_.IdF].SymbolDual)"})}) -join '/'
+
+            $RunTime = $(Get-Date) - $(Get-Process -Pid $Global:PID | Select-Object -ExpandProperty StartTime)
+            $Host.UI.RawUI.WindowTitle = $(if ($RunTime.TotalDays -lt 1) {"{0:hh\:mm}" -f $RunTime} else {"{0:dd\d\ hh\:mm}" -f $RunTime}) + " : " + $CurrentAlgos
 
             # Report stats
             if ($MinerStatusURL -and $MinerStatusKey) { & .\Includes\ReportStatus.ps1 -Key $MinerStatusKey -WorkerName $WorkerName -ActiveMiners $ActiveMiners -MinerStatusURL $MinerStatusURL }
