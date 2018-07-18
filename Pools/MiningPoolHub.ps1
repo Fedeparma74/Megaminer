@@ -83,9 +83,7 @@ if (($Querymode -eq "core" ) -or ($Querymode -eq "Menu")) {
 
     $Locations = "EU", "US", "Asia"
 
-    $FilterCoins = @("maxcoin")
-
-    $MiningPoolHub_Request.return | Where-Object coin_name -notin $FilterCoins | Where-Object time_since_last_block -gt 0 | ForEach-Object {
+    $MiningPoolHub_Request.return | Where-Object time_since_last_block -gt 0 | ForEach-Object {
 
         $MiningPoolHub_Algorithm = Get-AlgoUnifiedName $_.algo
         $MiningPoolHub_Coin = Get-CoinUnifiedName $_.coin_name
@@ -99,11 +97,18 @@ if (($Querymode -eq "core" ) -or ($Querymode -eq "Menu")) {
 
         $MiningPoolHub_Price = [double]($_.profit / $Divisor)
 
+        # fix for equihash btg
+        if ($_.coin_name -eq 'bitcoin-gold') {
+            $MiningPoolHub_Hosts = "us-east.equihash-hub.miningpoolhub.com;asia.equihash-hub.miningpoolhub.com;europe.equihash-hub.miningpoolhub.com" -split ';'
+        }
+        if ($_.coin_name -eq 'electroneum') {
+            $MiningPoolHub_Algorithm = 'Cn'
+        }
         foreach ($Location in $Locations) {
 
             $Server = $MiningPoolHub_Hosts | Sort-Object {$_ -like "$Location*"} -Descending | Select-Object -First 1
 
-            $enableSSL = ($MiningPoolHub_Algorithm -in @('CryptoNightV7', 'Equihash'))
+            $enableSSL = ($MiningPoolHub_Algorithm -in @('CnV7', 'Equihash'))
 
             $Result += [PSCustomObject]@{
                 Algorithm             = $MiningPoolHub_Algorithm

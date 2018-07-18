@@ -1,7 +1,7 @@
 {
-    "Path": "coolMiner-x64.exe",
-    "Uri": "https://github.com/yuzi-co/miners/releases/download/2018.6/coolMiner-x64-v1-4.7z",
-    "SHA256": "898f61db51c9c1d7a0edbede248add996dff80f8562d6022ee60182f73434fdc",
+    "Path": "ourminer-x64-1.1.0-cuda-9.2\\ourminer-x64.exe",
+    "Uri": "https://github.com/ourpool/ourminer/files/2196175/ourminer-x64-1.1.0-cuda-9.2.zip",
+    "SHA256": "33586037D58FC7075C1A80C3D02D25E730678E19CD8838483D04C29538380677",
     "Type": "NVIDIA",
     "Arguments": [
         "-o #Protocol#://#Server#:#Port#",
@@ -15,8 +15,9 @@
     ],
     "API": "Ccminer",
     "APIPort": 4068,
-    "Fee": 0.01,
     "Algorithms": {
-        "Lyra2z": "-a lyra2z"
+        "Lyra2z": "-a lyra2z",
+        "X16r": "-a x16r",
+        "X16s": "-a x16s"
     }
 }

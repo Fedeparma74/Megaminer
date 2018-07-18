@@ -5,13 +5,16 @@ function Set-NvidiaPowerLimit ([int]$PowerLimitPercent, [string]$Devices) {
     if ($PowerLimitPercent -eq 0) { return }
     foreach ($Device in @($Devices -split ',')) {
 
-        $Command = '.\includes\nvidia-smi.exe'
-        $Arguments = @(
-            "-i $Device"
-            "--query-gpu=power.default_limit"
-            "--format=csv,noheader"
-        )
-        $PowerDefaultLimit = [int](((& $Command $Arguments) -replace 'W').Trim())
+        # $Command = (Resolve-Path -Path '.\includes\nvidia-smi.exe').Path
+        # $Arguments = @(
+        #     "-i $Device"
+        #     "--query-gpu=power.default_limit"
+        #     "--format=csv,noheader"
+        # )
+        # $PowerDefaultLimit = [int](((& $Command $Arguments) -replace 'W').Trim())
+
+        $xpr = ".\includes\nvidia-smi.exe -i " + $Device + " --query-gpu=power.default_limit --format=csv,noheader"
+        $PowerDefaultLimit = [int]((invoke-expression $xpr) -replace 'W', '')
 
         #powerlimit change must run in admin mode
         $newProcess = New-Object System.Diagnostics.ProcessStartInfo ".\includes\nvidia-smi.exe"
@@ -69,18 +72,6 @@ function Replace-ForEachDevice {
             $Final = ""
             $Index = 0
             $Devices.Devices -split ',' | ForEach-Object {$Final += ($base -replace "#DeviceID#", $_ -replace "#DeviceIndex#", $Index); $Index++}
-            $ConfigFileArguments = $ConfigFileArguments.Substring(0, $_.index) + $Final + $ConfigFileArguments.Substring($_.index + $_.Length, $ConfigFileArguments.Length - ($_.index + $_.Length))
-        }
-    }
-
-    $Match = $ConfigFileArguments | Select-String -Pattern "#ForEachPCIBus#.*?#EndForEachPCIBus#"
-    if ($null -ne $Match) {
-
-        $Match.Matches | ForEach-Object {
-            $Base = $_.value -replace "#ForEachPCIBus#" -replace "#EndForEachPCIBus#"
-            $Final = ""
-            $Index = 0
-            $Devices.PCIBus -split ',' | ForEach-Object {$Final += ($base -replace "#DevicePCIBus#", $_ -replace "#DeviceIndex#", $Index); $Index++}
             $ConfigFileArguments = $ConfigFileArguments.Substring(0, $_.index) + $Final + $ConfigFileArguments.Substring($_.index + $_.Length, $ConfigFileArguments.Length - ($_.index + $_.Length))
         }
     }
@@ -381,7 +372,6 @@ Function Get-MiningTypes () {
             $PlatformID++
             $Devs
         })
-    $PnpDevices = Get-PnpDevice | Where-Object Class -eq Display
 
     # # start fake
     # $OCLDevices = @()
@@ -422,13 +412,6 @@ Function Get-MiningTypes () {
 
                 $PlatformID = $_.PlatformID
 
-                $PnpDeviceProperties = ($PnpDevices | Where-Object {$Vendors.($_.Manufacturer) -eq $Type})[$DeviceID] | Get-PnpDeviceProperty
-
-                $LocationInfo = ($PnpDeviceProperties | Where-Object KeyName -eq 'DEVPKEY_Device_LocationInfo').Data
-                if ($LocationInfo -match "^PCI bus (\d+), device (\d+), function (\d+)$") {
-                    $PCIBus = $matches[1]
-                }
-
                 if ($Type) {
                     if ($null -eq ($Types0 | Where-Object {$_.GroupName -eq $Name_Norm -and $_.Platform -eq $PlatformID})) {
                         $Types0 += [PSCustomObject] @{
@@ -438,12 +421,10 @@ Function Get-MiningTypes () {
                             Platform    = $PlatformID
                             MemoryGB    = $MemoryGB
                             PowerLimits = "0"
-                            PCIBus      = [string]$PCIBus
                         }
                     } else {
                         $Types0 | Where-Object {$_.GroupName -eq $Name_Norm -and $_.Platform -eq $PlatformID} | ForEach-Object {
                             $_.Devices += "," + $DeviceID
-                            $_.PCIBus += "," + $PCIBus
                         }
                     }
                 }
@@ -481,7 +462,6 @@ Function Get-MiningTypes () {
     }
 
     $Types = @()
-    $PnpDevices = Get-PnpDevice | Where-Object Class -eq Display
     $TypeID = 0
     $Types0 | ForEach-Object {
         if (!$Filter -or (Compare-Object $_.GroupName $Filter -IncludeEqual -ExcludeDifferent)) {
@@ -504,6 +484,7 @@ Function Get-MiningTypes () {
             $_ | Add-Member OCLDevices @($OCLDevices | Where-Object {$_.Vendor -eq $Pattern -and $_.Type -eq 'Gpu'})[$_.DevicesArray]
             if ($null -eq $_.Platform) {$_ | Add-Member Platform ($_.OCLDevices.PlatformID | Select-Object -First 1)}
             if ($null -eq $_.MemoryGB) {$_ | Add-Member MemoryGB ([int](($_.OCLDevices | Measure-Object -Property GlobalMemSize -Minimum | Select-Object -ExpandProperty Minimum) / 1GB ))}
+            if ($null -eq $_.DevicesMask) {$_ | Add-Member DevicesMask ('{0:X}' -f [int]($_.DevicesArray | ForEach-Object { [System.Math]::Pow(2, $_) } | Measure-Object -Sum).Sum)}
 
             $_.PowerLimits = @([int[]]($_.PowerLimits -split ',') | Sort-Object -Descending -Unique)
 
@@ -792,6 +773,19 @@ function Get-LiveHashRate {
                 }
             }
 
+            "cryptodredge" {
+                $Request = Invoke-TCPRequest2 $Server $port "summary" 5
+                if ($Request) {
+                    $Data = $Request -split ";" | ConvertFrom-StringData
+                    $HashRate = [double]$Data.HS
+                    if (-not $HashRate) {$HashRate = [double]$Data.KHS * [math]::Pow(1000, 1)}
+                    if (-not $HashRate) {$HashRate = [double]$Data.MHS * [math]::Pow(1000, 2)}
+                    if (-not $HashRate) {$HashRate = [double]$Data.GHS * [math]::Pow(1000, 3)}
+                    if (-not $HashRate) {$HashRate = [double]$Data.THS * [math]::Pow(1000, 4)}
+                    if (-not $HashRate) {$HashRate = [double]$Data.PHS * [math]::Pow(1000, 5)}
+                }
+            }
+
             "nicehashequihash" {
                 $Request = Invoke-TCPRequest $Server $port "status" 5
                 if ($Request) {
@@ -976,11 +970,22 @@ function Start-SubProcess {
         [String]$UseAlternateMinerLauncher = $true <# UselessGuru #>
     )
 
-    $PriorityNames = [PSCustomObject]@{-2 = "Idle"; -1 = "BelowNormal"; 0 = "Normal"; 1 = "AboveNormal"; 2 = "High"; 3 = "RealTime"}
+    $PriorityNames = @{
+        -2 = "Idle"
+        -1 = "BelowNormal"
+        0  = "Normal"
+        1  = "AboveNormal"
+        2  = "High"
+        3  = "RealTime"
+    }
 
     if ($UseAlternateMinerLauncher) {
 
-        $ShowWindow = [PSCustomObject]@{"Normal" = "SW_SHOW"; "Maximized" = "SW_SHOWMAXIMIZE"; "Minimized" = "SW_SHOWMINNOACTIVE"}
+        $ShowWindow = @{
+            Normal    = "SW_SHOW"
+            Maximized = "SW_SHOWMAXIMIZE"
+            Minimized = "SW_SHOWMINNOACTIVE"
+        }
 
         $Job = Start-Job `
             -InitializationScript ([scriptblock]::Create("Set-Location('$(Get-Location)');. .\Includes\CreateProcess.ps1")) `
@@ -989,7 +994,7 @@ function Start-SubProcess {
 
             . .\Includes\CreateProcess.ps1
             $ControllerProcess = Get-Process -Id $ControllerProcessID
-            if ($null -eq $ControllerProcess) {return}
+            if (-not $ControllerProcess) {return}
 
             $ProcessParams = @{
                 Binary           = $FilePath
@@ -1001,17 +1006,26 @@ function Start-SubProcess {
                 WorkingDirectory = $WorkingDirectory
             }
             $Process = Invoke-CreateProcess @ProcessParams
-            if ($null -eq $Process) {
-                [PSCustomObject]@{ProcessId = $null}
+            if (-not $Process) {
+                [PSCustomObject]@{
+                    ProcessId = $null
+                }
                 return
             }
 
-            [PSCustomObject]@{ProcessId = $Process.Id; ProcessHandle = $Process.Handle}
+            [PSCustomObject]@{
+                ProcessId     = $Process.Id
+                ProcessHandle = $Process.Handle
+            }
 
-            $ControllerProcess.Handle | Out-Null
-            $Process.Handle | Out-Null
+            $null = $ControllerProcess.Handle
+            $null = $Process.Handle
 
-            do {if ($ControllerProcess.WaitForExit(1000)) {$Process.CloseMainWindow() | Out-Null}}
+            do {
+                if ($ControllerProcess.WaitForExit(1000)) {
+                    $null = $Process.CloseMainWindow()
+                }
+            }
             while ($Process.HasExited -eq $false)
         }
     } else {
@@ -1019,38 +1033,56 @@ function Start-SubProcess {
             param($ControllerProcessID, $FilePath, $ArgumentList, $WorkingDirectory, $MinerWindowStyle)
 
             $ControllerProcess = Get-Process -Id $ControllerProcessID
-            if ($null -eq $ControllerProcess) {return}
-
-            $ProcessParam = @{}
-            $ProcessParam.Add("FilePath", $FilePath)
-            $ProcessParam.Add("WindowStyle", $MinerWindowStyle)
-            if ($ArgumentList -ne "") {$ProcessParam.Add("ArgumentList", $ArgumentList)}
-            if ($WorkingDirectory -ne "") {$ProcessParam.Add("WorkingDirectory", $WorkingDirectory)}
-            $Process = Start-Process @ProcessParam -PassThru
-            if ($null -eq $Process) {
-                [PSCustomObject]@{ProcessId = $null}
+            if (-not $ControllerProcess) {
                 return
             }
 
-            [PSCustomObject]@{ProcessId = $Process.Id; ProcessHandle = $Process.Handle}
+            $ProcessParam = @{
+                FilePath         = $FilePath
+                WindowStyle      = $MinerWindowStyle
+                ArgumentList     = $(if ($ArgumentList) {$ArgumentList})
+                WorkingDirectory = $(if ($WorkingDirectory) {$WorkingDirectory})
+            }
 
-            $ControllerProcess.Handle | Out-Null
-            $Process.Handle | Out-Null
+            $Process = Start-Process @ProcessParam -PassThru
+            if (-not $Process) {
+                [PSCustomObject]@{
+                    ProcessId = $null
+                }
+                return
+            }
 
-            do {if ($ControllerProcess.WaitForExit(1000)) {$Process.CloseMainWindow() | Out-Null}}
+            [PSCustomObject]@{
+                ProcessId     = $Process.Id
+                ProcessHandle = $Process.Handle
+            }
+
+            $null = $ControllerProcess.Handle
+            $null = $Process.Handle
+
+            do {
+                if ($ControllerProcess.WaitForExit(1000)) {
+                    $null = $Process.CloseMainWindow()
+                }
+            }
             while ($Process.HasExited -eq $false)
 
         }
     }
 
-    do {Start-Sleep 1; $JobOutput = Receive-Job $Job}
-    while ($null -eq $JobOutput)
+    do {
+        Start-Sleep -Seconds 1
+        $JobOutput = Receive-Job $Job
+    }
+    while ($JobOutput -eq $null)
 
-    $Process = Get-Process | Where-Object Id -EQ $JobOutput.ProcessId
-    $Process.Handle | Out-Null
-    $Process
+    if ($JobOutput.ProcessId -gt 0) {
+        $Process = Get-Process | Where-Object Id -eq $JobOutput.ProcessId
+        $null = $Process.Handle
+        $Process
 
-    if ($Process) {$Process.PriorityClass = $PriorityNames.$Priority}
+        if ($Process) {$Process.PriorityClass = $PriorityNames.$Priority}
+    }
 }
 
 function Expand-WebRequest {
@@ -1153,6 +1185,15 @@ function Get-Pools {
         foreach ($Pool in $AllPools) {
             #must have wallet
             if (!$Pool.User) {continue}
+
+            # Exclude pool algos and coins
+            if (
+                $Pool.Algorithm -in @($Config.("ExcludeAlgos_" + $Pool.PoolName) -split ',') -or
+                $Pool.Info -in @($Config.("ExcludeCoins_" + $Pool.PoolName) -split ',')
+            ) {
+                Log-Message "Excluding $($Pool.Algorithm)/$($Pool.Info) on $($Pool.PoolName)" -Severity Debug
+                continue
+            }
 
             #must be in algo filter list or no list
             if ($AlgoFilterList) {$Algofilter = Compare-Object $AlgoFilterList $Pool.Algorithm -IncludeEqual -ExcludeDifferent}
