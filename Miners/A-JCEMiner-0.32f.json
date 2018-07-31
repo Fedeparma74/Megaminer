@@ -1,0 +1,37 @@
+{
+    "Path": "jce_cn_gpu_miner64.exe",
+    "Uri": "https://github.com/jceminer/cn_gpu_miner/raw/master/jce_cn_gpu_miner.prototype.032f.zip",
+    "SHA256": "D7863F2DC9A50C20BE5A6DA9ABEC3D49BD94ACA3D6062249408E24291EE4BDE3",
+    "Type": "AMD",
+    "Arguments": [
+        "-o #Server#:#Port#",
+        "-u #Login#",
+        "-p #Password#",
+        "$(if ($enableSSL){'--ssl'})",
+        "$(if ($Nicehash){'--nicehash'})",
+        "-g #Devices#",
+        "--any",
+        "--auto",
+        "--no-cpu",
+        "--doublecheck",
+        "--mport #APIPort#",
+        "--stakjson",
+        "#AlgorithmParameters#"
+    ],
+    "API": "XMRig",
+    "APIPort": 4028,
+    "Fee": 0.009,
+    "SSL": true,
+    "Algorithms": {
+        "CnAlloy": "--variation 8",
+        "CnArto": "--variation 10",
+        "CnFast": "--variation 11",
+        "CnHaven": "--variation 12",
+        "CnHeavy": "--variation 5",
+        "CnLiteV7": "--variation 4",
+        "CnMkt": "--variation 9",
+        "CnSaber": "--variation 13",
+        "CnV7": "--variation 3",
+        "CnXTL": "--variation 7"
+    }
+}
